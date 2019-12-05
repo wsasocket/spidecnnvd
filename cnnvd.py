@@ -5,9 +5,10 @@ from random import randint
 from time import sleep
 
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from rebuild_cnnvd import parse_data_struct
+from selenium.common.exceptions import TimeoutException
+
 from parseCNNVD import get_more_CN_describe
+from rebuild_cnnvd import parse_data_struct
 
 
 class MoreElementsException(Exception):
@@ -32,48 +33,27 @@ def get_cnnvd_desc(webDriver, cve):
     result_list_path = r'/html/body/div[4]/div/div[1]/div/div[2]/ul/li'
     while True:
         CNNVD_list = driver.find_elements_by_xpath(result_list_path)
-        # print(type(CNNVD_list))
+        # 只有唯一结果的时候直接采纳
         if len(CNNVD_list) == 1:
             return CNNVD_list[0].find_element_by_xpath('div[1]/p/a[1]').text
-
+        # 当有多个可能的数据结果时需要逐个甄别
         for li in CNNVD_list:
             cnnvd = li.find_element_by_xpath('div[1]/p/a[1]').text
+            # 请求cnnvd详细数据
             data = get_more_CN_describe(cnnvd)
             data.seek(0)
             # print(data.getvalue())
             desc = parse_data_struct(data)
             sleep(randint(1, 5))
+            # 如果编号一致就采纳
             if desc['CVE编号：'].strip('\n') == 'CVE-{}'.format(cve):
                 return cnnvd
         else:
+            # 当页没有发现有效数据就进入到第二页中
+            # 假设结果最多两页
             page_2 = '/html/body/div[4]/div/div[1]/div/div[3]/a[4]'
             driver.find_element_by_xpath(page_2).click()
             sleep(3)
-
-
-
-    # try:
-    #     CNNVD = driver.find_element_by_xpath('/html/body/div[4]/div/div[1]/div/div[2]/ul/li/div[1]/p/a[1]')
-    # except NoSuchElementException:
-    #     return None, None
-    #
-    # try:
-    #     CNNVD = driver.find_element_by_xpath('/html/body/div[4]/div/div[1]/div/div[2]/ul/li[2]/div[1]/p/a[1]')
-    # except NoSuchElementException:
-    #     pass
-    # else:
-    #     raise MoreElementsException(cve)
-    #
-    # while True:
-    #     CNNVD = driver.find_element_by_xpath('/html/body/div[4]/div/div[1]/div/div[2]/ul/li/div[1]/p/a[1]')
-    #     if CNNVD.is_displayed():
-    #         # print(CNNVD.text)
-    #         break
-    #     print('Searching')
-    #     sleep(2)
-    # detail = driver.find_element_by_xpath('/html/body/div[4]/div/div[1]/div/div[2]/ul/li/div[1]/a')
-    # return CNNVD.text, detail.text
-    # # print(driver.find_element_by_xpath('/html/body/div[4]/div/div[1]/div/div[2]/ul/li/div[1]/a').text)
 
 
 if __name__ == "__main__":
@@ -88,37 +68,33 @@ if __name__ == "__main__":
             break
         print("Loading")
         sleep(2)
-
+    # 装载需要检索的CVE编号
     with open(r'D:\work\data\cve.txt') as fp:
         for line in fp:
             cves.append(line.strip('\n\r'))
-    print(len(cves))
+    print('Total Count: {}'.format(len(cves)))
     # cves=['2016-1062']
-    # fp = open (r'D:\work\data\cnnvd.txt','w')
     for cve in cves:
-        # print('CVE-{}'.format(cve))
         cnnvd = None
         try:
             cnnvd = get_cnnvd_desc(driver, cve)
         except TimeoutException as e:
             try:
+                # 删除文件，可能内容不可靠
                 os.remove(r'D:\work\data\CVE-{}.txt'.format(cve))
-            except:
+            except FileNotFoundError:
                 pass
             print('CVE-{} Searching Time out'.format(cve))
             continue
+        # 下面的意外已经不可能发生了
         except MoreElementsException as e:
             try:
                 os.remove(r'D:\work\data\CVE-{}.txt'.format(cve))
-            except:
+            except FileNotFoundError:
                 pass
             print(e)
             continue
 
-        # fp.close()
-        # print('\n')
-        # get_more_CN_describe(cnnvd)
-        # buf = '{},{},{}\n'.format(cve,cnnvd,detail)
         if cnnvd is None:
             print('CVE-{} Not Found Corresponding CNNVD'.format(cve))
             try:
@@ -127,18 +103,19 @@ if __name__ == "__main__":
                 pass
             continue
         print('{},{}'.format(cve, cnnvd))
-        # fp.writelines(buf)
         sleep(2 + randint(3, 18))
 
+        # 通过检索到的cnnvd查询详细信息
         try:
             buff = get_more_CN_describe(cnnvd)
         except TimeoutException as e:
             print('ERROR @ {}'.format(cnnvd))
             buff.close()
             continue
+
         cve_file = open(r'D:\work\data\CVE-{}.txt'.format(cve), 'w', encoding='utf-8')
         cve_file.write(buff.getvalue())
         cve_file.close()
         buff.close()
-    # fp.close()
+
     driver.quit()
